@@ -5,7 +5,8 @@
 #include <string>
 #include <iostream>
 #include <fstream>
-
+#include <chrono>
+#include <ctime>  
 
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
@@ -14,7 +15,17 @@
 #include <boost/asio/ip/address_v4.hpp>
 #include <boost/array.hpp>
 
+#define _CRT_SECURE_NO_WARNINGS
+
 using boost::asio::ip::udp;
+
+#pragma warning(disable : 4996)
+std::string get_timestamp()
+{
+	using namespace std; // For time_t, time and ctime;
+	//time_t now = time(0);
+	return std::to_string(time(0));
+}
 
 class csv {
 public:
@@ -37,7 +48,8 @@ class udp_client {
 public:
 	udp_client(boost::asio::io_context& io)
 	:	socket_(io), 
-		rx_timer_(io, boost::asio::chrono::milliseconds(10)) {
+		rx_timer_(io, boost::asio::chrono::milliseconds(10)),
+		file_() {
 		
 		socket_.open(udp::v4());
 		boost::asio::socket_base::broadcast option(true);
@@ -53,8 +65,23 @@ public:
 		std::cout << "Recv\r\n";
 		size_t len = socket_.receive_from(
 			boost::asio::buffer(recv_buf), sender_endpoint);
-		for (int i = 0; i < 8; i++) {
-			printf("%d ", recv_buf.data()[i]);
+		if (len > 0) {
+			sensor_number_ = recv_buf.data()[0];
+			value_type_ = recv_buf.data()[1];
+			sensor_data_ = (uint64_t)recv_buf.data()[2] 
+							|  (recv_buf.data()[3] << 8) 
+							| (recv_buf.data()[3] << 16) 
+							| (recv_buf.data()[5] << 24) 
+							| (recv_buf.data()[6] << 32)
+							| (recv_buf.data()[7] << 40)
+							| (recv_buf.data()[8] << 48)
+							| (recv_buf.data()[9] << 56);
+
+			
+			//printf("%d - %d - %ull - %s\r\n ", sensor_number_, value_type_, sensor_data_, get_timestamp());
+			file_.csv_writer(get_timestamp(),
+							std::to_string(sensor_number_), 
+							std::to_string(sensor_data_));
 		}
 		rx_timer_.async_wait(boost::bind(&udp_client::upd_cliend_rx, this));
 	}
@@ -65,12 +92,15 @@ public:
 private:
 	udp::socket socket_;
 	boost::asio::steady_timer rx_timer_;
+	uint8_t sensor_number_;
+	uint8_t value_type_;
+	uint64_t sensor_data_;
+
+	csv file_;
 };
 
 int main() {
 	try {
-		csv file;
-		file.csv_writer("1", "2", "3");
 		boost::asio::io_context io;
 		udp_client client(io);
 		io.run();
